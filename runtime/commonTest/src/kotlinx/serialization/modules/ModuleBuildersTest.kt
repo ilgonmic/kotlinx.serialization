@@ -7,7 +7,7 @@ package kotlinx.serialization.modules
 import kotlinx.serialization.*
 import kotlinx.serialization.PolyBase
 import kotlinx.serialization.PolyDerived
-import kotlin.reflect.KClass
+import kotlin.reflect.*
 import kotlin.test.*
 
 class ModuleBuildersTest {
@@ -144,7 +144,7 @@ class ModuleBuildersTest {
         val moduleA = SerializersModule {
             contextual(A::class, ASerializer)
             assertFailsWith<SerializerAlreadyRegisteredException> {
-                contextual(A::class, ASerializer)
+                contextual(A::class, object : KSerializer<A> by A.serializer() {})
             }
         }
         moduleA.assertModuleHas(aSerializer = true, bSerializer = false)
@@ -167,5 +167,55 @@ class ModuleBuildersTest {
         assertFailsWith<SerializerAlreadyRegisteredException> {
             incorrect + correct
         }
+    }
+
+    @Test
+    fun testDoesntThrowOnTheSameSerializer() {
+        val m1 = serializersModuleOf(A::class, A.serializer())
+        val m2 = serializersModuleOf(A::class, A.serializer())
+        val aggregate = m1 + m2
+        assertEquals(A.serializer(), aggregate.getContextual<A>())
+    }
+
+    @Test
+    fun testDoesntThrowOnTheEqualSerializers() {
+        val delegate = object : KSerializer<Unit> by UnitSerializer {
+            override fun equals(other: Any?): Boolean = (other is KSerializer<*>) && other.descriptor == descriptor
+        }
+
+        val delegate2 = object : KSerializer<Unit> by UnitSerializer {
+            override fun equals(other: Any?): Boolean = (other is KSerializer<*>) && other.descriptor == descriptor
+        }
+
+        val m1 = serializersModuleOf(Unit::class, delegate)
+        val m2 = serializersModuleOf(Unit::class, delegate2)
+        val aggregate = m1 + m2
+        assertEquals(delegate2, aggregate.getContextual<Unit>())
+        assertEquals(delegate, aggregate.getContextual<Unit>())
+    }
+
+    @Test
+    fun testThrowOnTheSamePolymorphicSerializer() {
+        val m1 = SerializersModule { polymorphic<Any> { A::class with A.serializer() } }
+        val m2 = SerializersModule { polymorphic<Any> { A::class with ASerializer } }
+        assertFailsWith<SerializerAlreadyRegisteredException> { m1 + m2 }
+    }
+
+    @Test
+    fun testDoesntThrowOnEqualPolymorphicSerializer() {
+        val delegate = object : KSerializer<Unit> by UnitSerializer {
+            override fun equals(other: Any?): Boolean = (other is KSerializer<*>) && other.descriptor == descriptor
+        }
+
+        val delegate2 = object : KSerializer<Unit> by UnitSerializer {
+            override fun equals(other: Any?): Boolean = (other is KSerializer<*>) && other.descriptor == descriptor
+        }
+
+        assertEquals(delegate as Any, delegate2 as Any)
+        val m1 = SerializersModule { polymorphic<Any> { Unit::class with delegate } }
+        val m2 = SerializersModule { polymorphic<Any> { Unit::class with delegate2 } }
+        val aggregate = m1 + m2
+        assertEquals(delegate2, aggregate.getPolymorphic(Any::class, Unit))
+        assertEquals(delegate, aggregate.getPolymorphic(Any::class, Unit))
     }
 }

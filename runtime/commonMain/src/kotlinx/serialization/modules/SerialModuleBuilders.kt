@@ -7,6 +7,7 @@
 package kotlinx.serialization.modules
 
 import kotlinx.serialization.*
+import kotlin.jvm.*
 import kotlin.reflect.*
 
 /**
@@ -148,15 +149,24 @@ public class SerializersModuleBuilder internal constructor() : SerialModuleColle
         }
     }
 
+    @JvmName("registerSerializer") // Don't mangle method name for prettier stack traces
     internal fun <T : Any> registerSerializer(
         forClass: KClass<T>,
         serializer: KSerializer<T>,
         allowOverwrite: Boolean = false
     ) {
-        if (!allowOverwrite && forClass in class2Serializer) throw SerializerAlreadyRegisteredException(forClass)
+        if (!allowOverwrite) {
+            val previous = class2Serializer[forClass]
+            if (previous != null && previous != serializer)
+                throw SerializerAlreadyRegisteredException(
+                    "Serializer for $forClass already registered in this module: $previous, " +
+                            "attempted to register $serializer"
+                )
+        }
         class2Serializer[forClass] = serializer
     }
 
+    @JvmName("registerPolymorphicSerializer") // Don't mangle
     internal fun <Base : Any, Sub : Base> registerPolymorphicSerializer(
         baseClass: KClass<Base>,
         concreteClass: KClass<Sub>,
@@ -165,18 +175,26 @@ public class SerializersModuleBuilder internal constructor() : SerialModuleColle
     ) {
         val name = concreteSerializer.descriptor.serialName
         val baseClassSerializers = polyBase2Serializers.getOrPut(baseClass, ::hashMapOf)
-        if (!allowOverwrite && concreteClass in baseClassSerializers) throw SerializerAlreadyRegisteredException(
-            baseClass,
-            concreteClass
-        )
+        if (!allowOverwrite) {
+            val previous = baseClassSerializers[concreteClass]
+            if (previous != null) {
+                if (previous == concreteSerializer) return
+                throw SerializerAlreadyRegisteredException(
+                    "Polymorphic serializer for $concreteClass already registered in this module: $previous, " +
+                            "attempted to register $concreteSerializer"
+                )
+            }
+        }
         baseClassSerializers[concreteClass] = concreteSerializer
 
         val names = polyBase2NamedSerializers.getOrPut(baseClass, ::hashMapOf)
         val previous = names.put(name, concreteSerializer)
         if (previous != null) {
             val conflictingClass = polyBase2Serializers[baseClass]!!.filter { it.value === previous }.keys.firstOrNull()
-            throw IllegalArgumentException("Multiple polymorphic serializers for base class '$baseClass' " +
-                    "have the same serial name '$name': '$concreteClass' and '$conflictingClass'")
+            throw IllegalArgumentException(
+                "Multiple polymorphic serializers for base class '$baseClass' " +
+                        "have the same serial name '$name': '$concreteClass' and '$conflictingClass'"
+            )
         }
     }
 
