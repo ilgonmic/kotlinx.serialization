@@ -17,5 +17,8 @@ project(':kotlinx-serialization-cbor').projectDir = file('./formats/cbor')
 include ':kotlinx-serialization-runtime-configparser'
 project(':kotlinx-serialization-runtime-configparser').projectDir = file('./formats/config')
 
+include ':kotlinx-serialization-propertyreader'
+project(':kotlinx-serialization-propertyreader').projectDir = file('./formats/properties')
+
 include ':benchmark'
 project(':benchmark').projectDir = file('./benchmark')
