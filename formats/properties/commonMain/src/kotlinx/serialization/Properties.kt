@@ -7,10 +7,36 @@ package kotlinx.serialization
 import kotlinx.serialization.CompositeDecoder.Companion.READ_DONE
 import kotlinx.serialization.modules.*
 
-class Mapper(context: SerialModule = EmptyModule) : AbstractSerialFormat(context) {
+
+/**
+ * Transforms a [Serializable] class' properties to a single flat [Map] which consists of
+ * string keys and primitive type values, and vice versa.
+ *
+ * If the given class has non-primitive property `d` of arbitrary type `D`, `D` values are inserted
+ * into the same map; keys for such values are prefixed with string `d.`:
+ *
+ * ```kotlin
+ * @Serializable
+ * class Data(val property1: String)
+ *
+ * @Serializable
+ * class Recursive(val data: Data, val property2: String)
+ *
+ * val map = Mapper.store(Recursive(Data("value1"), "value2"))
+ * // map contents would be the following:
+ * // property2 = value2
+ * // data.property1 = value1
+ * ```
+ *
+ * If the given class has a [List] property `l`, each value from the list
+ * would be prefixed with `l.N.`, where N is an index for particular value.
+ * Additional `l.size` property with a list size would be added.
+ * [Map] is treated as a key-value list.
+ */
+public class Properties(context: SerialModule = EmptyModule) : AbstractSerialFormat(context) {
 
     internal inner class OutMapper : NamedValueEncoder() {
-        override val context: SerialModule = this@Mapper.context
+        override val context: SerialModule = this@Properties.context
 
         override fun beginCollection(
             desc: SerialDescriptor,
@@ -39,7 +65,7 @@ class Mapper(context: SerialModule = EmptyModule) : AbstractSerialFormat(context
     }
 
     internal inner class OutNullableMapper : NamedValueEncoder() {
-        override val context: SerialModule = this@Mapper.context
+        override val context: SerialModule = this@Properties.context
 
         internal val map: MutableMap<String, Any?> = mutableMapOf()
 
@@ -64,7 +90,7 @@ class Mapper(context: SerialModule = EmptyModule) : AbstractSerialFormat(context
 
     internal inner class InMapper(private val map: Map<String, Any>) : NamedValueDecoder() {
         private var currentIndex = -1
-        override val context: SerialModule = this@Mapper.context
+        override val context: SerialModule = this@Properties.context
 
         override fun beginStructure(desc: SerialDescriptor, vararg typeParams: KSerializer<*>): CompositeDecoder {
             return InMapper(map).also { copyTagsTo(it) }
@@ -89,7 +115,7 @@ class Mapper(context: SerialModule = EmptyModule) : AbstractSerialFormat(context
     }
 
     internal inner class InNullableMapper(val map: Map<String, Any?>) : NamedValueDecoder() {
-        override val context: SerialModule = this@Mapper.context
+        override val context: SerialModule = this@Properties.context
         private var currentIndex = -1
 
         override fun beginStructure(desc: SerialDescriptor, vararg typeParams: KSerializer<*>): CompositeDecoder {
@@ -119,59 +145,121 @@ class Mapper(context: SerialModule = EmptyModule) : AbstractSerialFormat(context
         }
     }
 
-    fun <T> map(strategy: SerializationStrategy<T>, obj: T): Map<String, Any> {
+    /**
+     * Stores properties from given [value] to a map and returns this map.
+     * All [T]'s properties' values must be non-null.
+     */
+    public fun <T> store(strategy: SerializationStrategy<T>, value: T): Map<String, Any> {
         val m = OutMapper()
-        m.encode(strategy, obj)
+        m.encode(strategy, value)
         return m.map
     }
 
-    fun <T> mapNullable(strategy: SerializationStrategy<T>, obj: T): Map<String, Any?> {
+    /**
+     * Stores properties from given [value] to a map and returns this map.
+     * This method writes `null` values to the map, if they're present in [T].
+     */
+    public fun <T> storeNullable(strategy: SerializationStrategy<T>, value: T): Map<String, Any?> {
         val m = OutNullableMapper()
-        m.encode(strategy, obj)
+        m.encode(strategy, value)
         return m.map
     }
 
-    fun <T> unmap(strategy: DeserializationStrategy<T>, map: Map<String, Any>): T {
+    /**
+     * Loads properties from given [map], assigns them to an object and returns this object.
+     * [T] may contain properties of nullable types; they will be filled by non-null values from the [map], if present.
+     */
+    public fun <T> load(strategy: DeserializationStrategy<T>, map: Map<String, Any>): T {
         val m = InMapper(map)
         return m.decode(strategy)
     }
 
-    fun <T> unmapNullable(strategy: DeserializationStrategy<T>, map: Map<String, Any?>): T {
+    /**
+     * Loads properties from given [map], assigns them to an object and returns this object.
+     * Writes null values from [map] to nullable properties in [T].
+     */
+    public fun <T> loadNullable(strategy: DeserializationStrategy<T>, map: Map<String, Any?>): T {
         val m = InNullableMapper(map)
         return m.decode(strategy)
     }
 
+    /**
+     * Todo: KDoc
+     */
     @ImplicitReflectionSerializer
-    inline fun <reified T : Any> map(obj: T): Map<String, Any> = map(context.getContextualOrDefault(T::class), obj)
+    public inline fun <reified T : Any> store(obj: T): Map<String, Any> =
+        store(context.getContextualOrDefault(T::class), obj)
 
+    /**
+     * Todo: KDoc
+     */
     @ImplicitReflectionSerializer
-    inline fun <reified T : Any> mapNullable(obj: T): Map<String, Any?> =
-        mapNullable(context.getContextualOrDefault(T::class), obj)
+    public inline fun <reified T : Any> storeNullable(obj: T): Map<String, Any?> =
+        storeNullable(context.getContextualOrDefault(T::class), obj)
 
+    /**
+     * Todo: KDoc
+     */
     @ImplicitReflectionSerializer
-    inline fun <reified T : Any> unmap(map: Map<String, Any>): T = unmap(context.getContextualOrDefault(T::class), map)
+    public inline fun <reified T : Any> load(map: Map<String, Any>): T =
+        load(context.getContextualOrDefault(T::class), map)
 
+    /**
+     * Todo: KDoc
+     */
     @ImplicitReflectionSerializer
-    inline fun <reified T : Any> unmapNullable(map: Map<String, Any?>): T =
-        unmapNullable(context.getContextualOrDefault(T::class), map)
+    public inline fun <reified T : Any> loadNullable(map: Map<String, Any?>): T =
+        loadNullable(context.getContextualOrDefault(T::class), map)
 
-    companion object {
-        val default = Mapper()
+    public companion object {
+        public val DEFAULT: Properties = Properties()
 
-        fun <T> map(strategy: SerializationStrategy<T>, obj: T): Map<String, Any> = default.map(strategy, obj)
-        fun <T> mapNullable(strategy: SerializationStrategy<T>, obj: T): Map<String, Any?> =
-            default.mapNullable(strategy, obj)
-        fun <T> unmap(strategy: DeserializationStrategy<T>, map: Map<String, Any>): T = default.unmap(strategy, map)
-        fun <T> unmapNullable(strategy: DeserializationStrategy<T>, map: Map<String, Any?>): T =
-            default.unmapNullable(strategy, map)
+        /**
+         * Todo: KDoc
+         */
+        public fun <T> store(strategy: SerializationStrategy<T>, obj: T): Map<String, Any> =
+            DEFAULT.store(strategy, obj)
 
+        /**
+         * Todo: KDoc
+         */
+        public fun <T> storeNullable(strategy: SerializationStrategy<T>, obj: T): Map<String, Any?> =
+            DEFAULT.storeNullable(strategy, obj)
+
+        /**
+         * Todo: KDoc
+         */
+        public fun <T> load(strategy: DeserializationStrategy<T>, map: Map<String, Any>): T =
+            DEFAULT.load(strategy, map)
+
+        /**
+         * Todo: KDoc
+         */
+        public fun <T> loadNullable(strategy: DeserializationStrategy<T>, map: Map<String, Any?>): T =
+            DEFAULT.loadNullable(strategy, map)
+
+        /**
+         * Todo: KDoc
+         */
         @ImplicitReflectionSerializer
-        inline fun <reified T : Any> map(obj: T): Map<String, Any> = default.map(obj)
+        public inline fun <reified T : Any> store(obj: T): Map<String, Any> = DEFAULT.store(obj)
+
+        /**
+         * Todo: KDoc
+         */
         @ImplicitReflectionSerializer
-        inline fun <reified T : Any> mapNullable(obj: T): Map<String, Any?> = default.mapNullable(obj)
+        public inline fun <reified T : Any> storeNullable(obj: T): Map<String, Any?> = DEFAULT.storeNullable(obj)
+
+        /**
+         * Todo: KDoc
+         */
         @ImplicitReflectionSerializer
-        inline fun <reified T : Any> unmap(map: Map<String, Any>): T = default.unmap(map)
+        public inline fun <reified T : Any> load(map: Map<String, Any>): T = DEFAULT.load(map)
+
+        /**
+         * Todo: KDoc
+         */
         @ImplicitReflectionSerializer
-        inline fun <reified T : Any> unmapNullable(map: Map<String, Any?>): T = default.unmapNullable(map)
+        public inline fun <reified T : Any> loadNullable(map: Map<String, Any?>): T = DEFAULT.loadNullable(map)
     }
 }
